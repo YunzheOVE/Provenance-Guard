@@ -1,0 +1,17 @@
+Submit AI-sounding text:
+$body = '{"text": "Artificial intelligence represents a transformative paradigm shift in modern society. It is important to note that while the benefits of AI are numerous, it is equally essential to consider the ethical implications. Furthermore, stakeholders across various sectors must collaborate to ensure responsible deployment.", "creator_id": "demo-user"}'
+Invoke-RestMethod -Uri http://localhost:5000/submit -Method Post -ContentType "application/json" -Body $body | ConvertTo-Json
+
+Submit human-sounding text:
+$body = '{"text": "ok so i finally tried that new ramen place downtown and honestly? underwhelming. the broth was fine but they put WAY too much sodium in it and i was thirsty for like three hours after. my friend got the spicy version and said it was better. probably wont go back unless someone drags me there", "creator_id": "demo-user-2"}'
+Invoke-RestMethod -Uri http://localhost:5000/submit -Method Post -ContentType "application/json" -Body $body | ConvertTo-Json
+
+Submit an appeal (paste the content_id from the AI result above):
+$appeal = '{"content_id": "PASTE-CONTENT-ID-HERE", "creator_reasoning": "I wrote this myself from personal experience. I am a non-native English speaker and my writing style may appear more formal than typical."}'
+Invoke-RestMethod -Uri http://localhost:5000/appeal -Method Post -ContentType "application/json" -Body $appeal | ConvertTo-Json
+
+Check the audit log (also works in the browser at http://localhost:5000/log):
+Invoke-RestMethod -Uri http://localhost:5000/log | ConvertTo-Json -Depth 5
+
+Trigger the rate limit (run this last — sends 12 requests and shows 429 on 11 and 12):
+$results = @(); 1..12 | ForEach-Object { $b = '{"text": "Rate limit test.", "creator_id": "test"}'; try { $null = Invoke-RestMethod -Uri http://localhost:5000/submit -Method Post -ContentType "application/json" -Body $b; $results += "Request ${_}: 200 OK" } catch { $results += "Request ${_}: $($_.Exception.Response.StatusCode.value__) (rate limited)" } }; $results
