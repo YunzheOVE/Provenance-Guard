@@ -1,6 +1,8 @@
 import json
 import os
 import re
+import statistics
+import string
 import uuid
 from datetime import datetime, timezone
 
@@ -92,6 +94,37 @@ def classify_with_groq(text: str) -> float:
     return 0.5  # neutral fallback if all parsing fails
 
 
+# ---------- Signal 2: Stylometric heuristics ----------
+
+def compute_stylometric_score(text: str) -> dict:
+    sentences = [s.strip() for s in re.split(r'[.!?]+', text) if s.strip()]
+    if not sentences:
+        return {"stylo_score": 0.5, "var_score": 0.5, "ttr_score": 0.5, "punct_score": 0.5}
+
+    # Sentence-length variance: low variance → uniform → more AI-like → higher score
+    lengths = [len(s.split()) for s in sentences]
+    std_dev = statistics.stdev(lengths) if len(lengths) > 1 else 0.0
+    var_score = max(0.0, 1.0 - std_dev / 15.0)
+
+    # Type-token ratio: broader vocabulary diversity → more AI-like → higher score
+    words = re.findall(r'\b\w+\b', text.lower())
+    ttr_score = len(set(words)) / len(words) if words else 0.5
+
+    # Punctuation density: AI text uses more punctuation per sentence → higher score
+    punct_count = sum(1 for c in text if c in string.punctuation)
+    punct_per_sentence = punct_count / len(sentences)
+    punct_score = min(punct_per_sentence / 4.0, 1.0)
+
+    stylo_score = (var_score + ttr_score + punct_score) / 3.0
+
+    return {
+        "stylo_score": round(stylo_score, 4),
+        "var_score": round(var_score, 4),
+        "ttr_score": round(ttr_score, 4),
+        "punct_score": round(punct_score, 4),
+    }
+
+
 # ---------- Routes ----------
 
 @app.route("/submit", methods=["POST"])
@@ -112,18 +145,22 @@ def submit():
     content_id = str(uuid.uuid4())
     timestamp = datetime.now(timezone.utc).isoformat()
 
-    # Signal 1
+    # Signal 2: stylometrics (always runs, no external dependency)
+    stylo = compute_stylometric_score(text)
+    stylo_score = stylo["stylo_score"]
+
+    # Signal 1: Groq LLM
     try:
         llm_score = classify_with_groq(text)
         llm_fallback = False
     except Exception as e:
         with open("debug.log", "a") as f:
             f.write(f"Groq call failed: {type(e).__name__}: {e}\n")
-        llm_score = 0.5
+        llm_score = stylo_score  # fall back to stylometrics rather than blind 0.5
         llm_fallback = True
 
-    # Milestone 3: confidence = llm_score (Signal 2 added in M4)
-    confidence = llm_score
+    # Combined confidence: LLM weighted higher (semantic > structural)
+    confidence = round(0.6 * llm_score + 0.4 * stylo_score, 4)
 
     if confidence >= 0.65:
         attribution = "likely_ai"
@@ -141,8 +178,12 @@ def submit():
         "creator_id": creator_id,
         "timestamp": timestamp,
         "attribution": attribution,
-        "confidence": round(confidence, 4),
+        "confidence": confidence,
         "llm_score": round(llm_score, 4),
+        "stylo_score": stylo_score,
+        "var_score": stylo["var_score"],
+        "ttr_score": stylo["ttr_score"],
+        "punct_score": stylo["punct_score"],
         "llm_fallback": llm_fallback,
         "status": "classified",
     })
@@ -150,8 +191,9 @@ def submit():
     return jsonify({
         "content_id": content_id,
         "attribution": attribution,
-        "confidence": round(confidence, 4),
+        "confidence": confidence,
         "llm_score": round(llm_score, 4),
+        "stylo_score": stylo_score,
         "label": label,
     })
 
