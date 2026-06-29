@@ -1,0 +1,6 @@
+.env
+.venv/
+audit_log.json
+__pycache__/
+*.pyc
+flask.md
